@@ -1,0 +1,14 @@
+{
+  "name": "birthday-bot",
+  "version": "1.0.0",
+  "description": "Slack birthday reminder bot from Notion",
+  "main": "birthday-bot.js",
+  "scripts": {
+    "start": "node birthday-bot.js"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.15",
+    "@slack/web-api": "^7.0.0",
+    "node-cron": "^3.0.3"
+  }
+}
