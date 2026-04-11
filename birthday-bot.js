@@ -6,6 +6,7 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const NOTION_DATABASE_ID = "281135c9b8ac4a40ac16c8c6ac34955f";
 const SLACK_TOKEN = process.env.SLACK_TOKEN;
 const SLACK_CHANNEL = "C0AR67VRHU5";
+const NOTION_DB_URL = "https://www.notion.so/281135c9b8ac4a40ac16c8c6ac34955f";
 
 const notion = new Client({ auth: NOTION_TOKEN });
 const slack = new WebClient(SLACK_TOKEN);
@@ -36,22 +37,29 @@ function formatDate(dateStr) {
   return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
-function daysLabel(n) {
-  if (n === 1) return "день";
-  if (n >= 2 && n <= 4) return "дні";
-  return "днів";
-}
-
 function buildMessage(record, daysAhead) {
   const name = record.name;
   const parts = [record.company, record.position].filter(Boolean).join(", ");
   const subtitle = parts ? ` (${parts})` : "";
   const dateFormatted = formatDate(record.birthday);
+  const budget = record.budget ? record.budget : null;
+  const budgetLine = budget ? `\n💛 Час подумати над подарунком — бюджет ${budget}` : `\n💛 Час подумати над подарунком`;
+
+  if (daysAhead === 10) {
+    return `🎂 За 10 днів — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}${budgetLine}\n📋 Контакти та ідеї: ${NOTION_DB_URL}`;
+  }
+
+  if (daysAhead === 5) {
+    return `🎂 За 5 днів — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\n⚡️ Нагадуємо — подарунок ще не обрано!\n📋 Контакти та ідеї: ${NOTION_DB_URL}`;
+  }
+
+  if (daysAhead === 3) {
+    return `🎂 За 3 дні — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\n🔥 Останній момент — подарунок треба вже сьогодні!\n📋 Контакти та ідеї: ${NOTION_DB_URL}`;
+  }
 
   if (daysAhead === 0) {
-    return `🎉 Сьогодні день народження у *${name}*${subtitle}\n📅 ${dateFormatted}`;
+    return `🎉 Сьогодні день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\n🌟 Не забудьте привітати!\n📋 Контакти: ${NOTION_DB_URL}`;
   }
-  return `🎂 За ${daysAhead} ${daysLabel(daysAhead)} — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}`;
 }
 
 async function fetchBirthdays() {
@@ -74,6 +82,7 @@ async function fetchBirthdays() {
         name: props["Імʼя"]?.title?.[0]?.plain_text ?? "—",
         company: props["Компанія"]?.rich_text?.[0]?.plain_text ?? "",
         position: props["Посада"]?.rich_text?.[0]?.plain_text ?? "",
+        budget: props["Бюджет план"]?.rich_text?.[0]?.plain_text ?? "",
         birthday: birthdayDate,
         monthDay: toMonthDay(birthdayDate),
       });
