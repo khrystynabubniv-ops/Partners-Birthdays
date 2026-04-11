@@ -37,28 +37,38 @@ function formatDate(dateStr) {
   return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
+function giftLine(giftIdea) {
+  if (giftIdea && giftIdea.trim()) {
+    return `Ідея є, перевір тут: ${NOTION_DB_URL}`;
+  }
+  return `Подарунок ще не обрано`;
+}
+
 function buildMessage(record, daysAhead) {
   const name = record.name;
   const parts = [record.company, record.position].filter(Boolean).join(", ");
   const subtitle = parts ? ` (${parts})` : "";
   const dateFormatted = formatDate(record.birthday);
-  const budget = record.budget ? record.budget : null;
-  const budgetLine = budget ? `\n💛 Час подумати над подарунком — бюджет ${budget}` : `\n💛 Час подумати над подарунком`;
+  const budget = record.budget ? `\nБюджет: ${record.budget}` : "";
+  const gift = giftLine(record.giftIdea);
 
   if (daysAhead === 10) {
-    return `🎂 За 10 днів — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}${budgetLine}\n📋 Контакти та ідеї: ${NOTION_DB_URL}`;
+    return `🎂 За 10 днів — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}${budget}\n${gift}\nКонтакти та ідеї: ${NOTION_DB_URL}`;
   }
 
   if (daysAhead === 5) {
-    return `🎂 За 5 днів — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\n⚡️ Нагадуємо — подарунок ще не обрано!\n📋 Контакти та ідеї: ${NOTION_DB_URL}`;
+    return `🎂 За 5 днів — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\n${gift}\nКонтакти та ідеї: ${NOTION_DB_URL}`;
   }
 
   if (daysAhead === 3) {
-    return `🎂 За 3 дні — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\n🔥 Останній момент — подарунок треба вже сьогодні!\n📋 Контакти та ідеї: ${NOTION_DB_URL}`;
+    const urgency = record.giftIdea && record.giftIdea.trim()
+      ? `Останній момент!\n${gift}`
+      : `Останній момент — подарунок треба вже сьогодні`;
+    return `🎂 За 3 дні — день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\n${urgency}\nКонтакти та ідеї: ${NOTION_DB_URL}`;
   }
 
   if (daysAhead === 0) {
-    return `🎉 Сьогодні день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\n🌟 Не забудьте привітати!\n📋 Контакти: ${NOTION_DB_URL}`;
+    return `🎉 Сьогодні день народження у *${name}*${subtitle}\n📅 ${dateFormatted}\nНе забудьте привітати!\nКонтакти: ${NOTION_DB_URL}`;
   }
 }
 
@@ -83,6 +93,7 @@ async function fetchBirthdays() {
         company: props["Компанія"]?.rich_text?.[0]?.plain_text ?? "",
         position: props["Посада"]?.rich_text?.[0]?.plain_text ?? "",
         budget: props["Бюджет план"]?.rich_text?.[0]?.plain_text ?? "",
+        giftIdea: props["Ідея подарунку"]?.rich_text?.[0]?.plain_text ?? "",
         birthday: birthdayDate,
         monthDay: toMonthDay(birthdayDate),
       });
