@@ -6,7 +6,9 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const NOTION_DATABASE_ID = "281135c9b8ac4a40ac16c8c6ac34955f";
 const SLACK_TOKEN = process.env.SLACK_TOKEN;
 const SLACK_CHANNEL = "C0AR67VRHU5";
+const CEO_SLACK_MENTION = "<@D0AU2AFCSN6>";
 const NOTION_DB_URL = "https://www.notion.so/281135c9b8ac4a40ac16c8c6ac34955f";
+const DESIGN_TASK_BOT_URL = "https://genesistech.slack.com/archives/D0ATEC745GU";
 
 const notion = new Client({ auth: NOTION_TOKEN });
 const slack = new WebClient(SLACK_TOKEN);
@@ -39,9 +41,15 @@ function formatDate(dateStr) {
 
 function buildMessage(record, daysAhead) {
   const name = record.name;
+  const dateFormatted = formatDate(record.birthday);
+
+  if (record.ceo) {
+    const timing = daysAhead === 0 ? "Сьогодні" : `За ${daysAhead} днів`;
+    return `${CEO_SLACK_MENTION}\n🎂 ${timing} — ДН партнера CEO - ${name}\n📅 ${dateFormatted}\n\nЯкщо вам потрібна будь-яка таска від дизайнера, створіть її через чатбот якнайшвидше, аби дизайнер запланував її собі: ${DESIGN_TASK_BOT_URL}`;
+  }
+
   const parts = [record.company, record.position].filter(Boolean).join(", ");
   const subtitle = parts ? ` (${parts})` : "";
-  const dateFormatted = formatDate(record.birthday);
   const budget = record.budget ? `\nБюджет: ${record.budget}` : "";
   const hasGift = record.giftIdea && record.giftIdea.trim();
 
@@ -90,6 +98,7 @@ async function fetchBirthdays() {
         position: props["Посада"]?.rich_text?.[0]?.plain_text ?? "",
         budget: props["Бюджет план"]?.rich_text?.[0]?.plain_text ?? "",
         giftIdea: props["Ідея подарунку"]?.rich_text?.[0]?.plain_text ?? "",
+        ceo: props["CEO"]?.checkbox ?? false,
         birthday: birthdayDate,
         monthDay: toMonthDay(birthdayDate),
       });
@@ -116,7 +125,7 @@ async function checkAndNotify() {
       const text = buildMessage(record, daysAhead);
       try {
         await slack.chat.postMessage({ channel: SLACK_CHANNEL, text });
-        console.log(`✓ Надіслано: ${record.name} (за ${daysAhead} днів)`);
+        console.log(`✓ Надіслано: ${record.name} (за ${daysAhead} днів, channel ${SLACK_CHANNEL})`);
         sent++;
       } catch (err) {
         console.error(`✗ Помилка для ${record.name}:`, err.message);
