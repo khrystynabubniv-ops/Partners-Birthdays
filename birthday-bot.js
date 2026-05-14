@@ -181,26 +181,8 @@ function mediaStatusText(record) {
   return `${baseStatus}, [${notionStatus}]`;
 }
 
-function mediaReminderCopy(daysAhead, hasGift) {
-  if (daysAhead === 10) {
-    return "Є час спокійно обрати варіант, узгодити бюджет і контакти.";
-  }
-
-  if (daysAhead === 5) {
-    return "Час фіналізувати рішення та деталі вручення.";
-  }
-
-  if (daysAhead === 3) {
-    return hasGift
-      ? "Останній момент: перевірте деталі й закрийте підготовку сьогодні."
-      : "Останній момент: якщо подарунок ще не обрано, краще закрити це сьогодні.";
-  }
-
-  if (daysAhead === 0) {
-    return "Сьогодні вітаємо. Перевірте контакти й деталі перед повідомленням.";
-  }
-
-  return "Перевірте деталі й оновіть статус у таблиці.";
+function mediaReminderCopy() {
+  return "Не відкладай на останній момент — зазирни до контактів і знайди ідею, яка точно потрапить у серце 🎁";
 }
 
 function mediaReminderTitle(record, daysAhead) {
@@ -213,17 +195,7 @@ function mediaReminderTitle(record, daysAhead) {
 
 function buildMediaMessage(record, daysAhead) {
   const dateFormatted = formatDate(record.birthday);
-  const hasGift = Boolean(record.giftIdea && record.giftIdea.trim());
   const status = mediaStatusText(record);
-  const fields = [
-    { label: "Дата", value: dateFormatted },
-    { label: "Компанія", value: record.company },
-    { label: "Посада", value: record.position },
-    { label: "Бюджет", value: record.budget },
-  ]
-    .filter((field) => field.value)
-    .map((field) => mrkdwnBlock(`*${field.label}:*\n${field.value}`));
-
   const plainTitle = mediaReminderTitle(record, daysAhead).replace(/\*/g, "");
   const text = `${plainTitle}. Статус: ${status}`;
 
@@ -234,14 +206,13 @@ function buildMediaMessage(record, daysAhead) {
         type: "section",
         text: mrkdwnBlock(mediaReminderTitle(record, daysAhead)),
       },
-      ...(fields.length ? [{ type: "section", fields }] : []),
       {
         type: "section",
-        text: mrkdwnBlock(`*Статус:* ${status}`),
+        text: mrkdwnBlock(`📅 Дата: ${dateFormatted}\nСтатус: ${status}`),
       },
       {
         type: "section",
-        text: mrkdwnBlock(mediaReminderCopy(daysAhead, hasGift)),
+        text: mrkdwnBlock(mediaReminderCopy()),
       },
       {
         type: "actions",
@@ -260,10 +231,9 @@ function buildMediaMessage(record, daysAhead) {
 
 function buildCeoMessage(record, daysAhead, ceoMention) {
   const dateFormatted = formatDate(record.birthday);
-  const title = daysAhead === 0
-    ? `🎉 Сьогодні день народження CEO-партнера — *${record.name}*`
-    : `🎂 ${timingText(daysAhead)} — день народження CEO-партнера — *${record.name}*`;
-  const text = `${ceoMention} ${title.replace(/\*/g, "")}. ${dateFormatted}. Потрібна дизайн-задача: ${DESIGN_TASK_BOT_URL}`;
+  const title = `🎂 ${timingText(daysAhead)} — день народження партнера CEO · *${record.name}*`;
+  const copy = "Саме час подбати про привітання! Якщо потрібен подарунок від дизайнера — створи таску заздалегідь, щоб все встигли підготувати:";
+  const text = `${ceoMention} ${title.replace(/\*/g, "")}. ${dateFormatted}. ${copy} ${DESIGN_TASK_BOT_URL}`;
 
   return {
     text,
@@ -274,14 +244,11 @@ function buildCeoMessage(record, daysAhead, ceoMention) {
       },
       {
         type: "section",
-        fields: [
-          mrkdwnBlock(`*Дата:*\n${dateFormatted}`),
-          mrkdwnBlock(`*Тип:*\nПартнер CEO`),
-        ],
+        text: mrkdwnBlock(`📅 ${dateFormatted}`),
       },
       {
         type: "section",
-        text: mrkdwnBlock("Якщо потрібна будь-яка задача від дизайнера, створіть її через чатбот якнайшвидше, щоб дизайнер встиг запланувати роботу."),
+        text: mrkdwnBlock(copy),
       },
       {
         type: "actions",
