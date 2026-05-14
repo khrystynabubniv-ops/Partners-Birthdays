@@ -421,8 +421,10 @@ async function ensureTrackingProperties() {
     trackingPropertiesEnsured = true;
     return true;
   } catch (err) {
-    console.warn(`Не вдалося підготувати службові Notion-поля для Slack-оновлень: ${err.message}`);
-    return false;
+    console.warn(`Не вдалося автоматично підготувати службові Notion-поля: ${err.message}`);
+    console.warn(`Якщо поля вже створені вручну, бот все одно спробує записати Slack tracking.`);
+    trackingPropertiesEnsured = true;
+    return true;
   }
 }
 
@@ -439,6 +441,16 @@ async function updateTrackingProperties(record, values) {
     page_id: record.id,
     properties,
   });
+}
+
+async function tryUpdateTrackingProperties(record, values) {
+  try {
+    await updateTrackingProperties(record, values);
+    return true;
+  } catch (err) {
+    console.warn(`Не вдалося записати Slack tracking для ${record.name}: ${err.message}`);
+    return false;
+  }
 }
 
 async function fetchBirthdays() {
@@ -505,7 +517,7 @@ async function postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabl
       blocks: message.blocks,
       link_names: true,
     });
-    await updateTrackingProperties(record, {
+    await tryUpdateTrackingProperties(record, {
       messageTs: record.slackMessageTs,
       messageChannel: channel,
       reminderKey: key,
@@ -523,7 +535,7 @@ async function postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabl
   });
 
   if (trackingEnabled && response.ts) {
-    await updateTrackingProperties(record, {
+    await tryUpdateTrackingProperties(record, {
       messageTs: response.ts,
       messageChannel: SLACK_CHANNEL,
       reminderKey: key,
@@ -633,7 +645,7 @@ async function syncTrackedStatuses() {
         blocks: message.blocks,
         link_names: true,
       });
-      await updateTrackingProperties(record, {
+      await tryUpdateTrackingProperties(record, {
         messageTs: record.slackMessageTs,
         messageChannel: channel,
         reminderKey: record.slackReminderKey,
