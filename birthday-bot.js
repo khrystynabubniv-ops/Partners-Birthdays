@@ -240,7 +240,7 @@ function buildCeoMessage(record, daysAhead, ceoMention) {
     blocks: [
       {
         type: "section",
-        text: mrkdwnBlock(`${ceoMention}\n${title}`),
+        text: mrkdwnBlock(title),
       },
       {
         type: "section",
@@ -248,7 +248,7 @@ function buildCeoMessage(record, daysAhead, ceoMention) {
       },
       {
         type: "section",
-        text: mrkdwnBlock(copy),
+        text: mrkdwnBlock(`${ceoMention} ${copy}`),
       },
       {
         type: "actions",
