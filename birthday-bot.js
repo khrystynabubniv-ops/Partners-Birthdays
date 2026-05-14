@@ -437,10 +437,10 @@ function findRecordByName(records, targetName) {
   return records.find((record) => record.name.trim().toLowerCase().includes(normalizedTarget));
 }
 
-async function postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled) {
+async function postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled, options = {}) {
   const message = buildSlackMessage(record, daysAhead, ceoMention);
   const key = reminderKey(daysAhead);
-  const trackedMessageIsCurrent = trackingEnabled && record.slackMessageTs && record.slackReminderKey === key;
+  const trackedMessageIsCurrent = options.updateExisting && trackingEnabled && record.slackMessageTs && record.slackReminderKey === key;
 
   if (trackedMessageIsCurrent) {
     const channel = record.slackMessageChannel || SLACK_CHANNEL;
