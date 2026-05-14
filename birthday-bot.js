@@ -169,70 +169,23 @@ function daysUntilBirthday(dateStr) {
   return Math.round((nextBirthday - today) / 86400000);
 }
 
-function statusValue(record) {
-  const rawStatus = statusSnapshot(record);
-  const label = rawStatus || (record.giftIdea ? "Ідея подарунку є" : "Подарунок ще не обрано");
-  const normalized = label.toLowerCase();
-  let copy = label;
-
-  if (
-    normalized.includes("не обра") ||
-    normalized.includes("ще не") ||
-    normalized.includes("not chosen") ||
-    normalized.includes("not selected") ||
-    normalized.includes("todo") ||
-    normalized.includes("to do")
-  ) {
-    copy = "подарунок ще не обрано";
-  } else if (
-    normalized.includes("замов") ||
-    normalized.includes("ordered")
-  ) {
-    copy = "подарунок уже замовлено";
-  } else if (
-    normalized.includes("куп") ||
-    normalized.includes("готов") ||
-    normalized.includes("ready") ||
-    normalized.includes("done")
-  ) {
-    copy = "подарунок готовий";
-  } else if (
-    normalized.includes("вруч") ||
-    normalized.includes("надісл") ||
-    normalized.includes("delivered") ||
-    normalized.includes("sent")
-  ) {
-    copy = "подарунок вже передано";
-  } else if (
-    normalized.includes("обра") ||
-    normalized.includes("іде") ||
-    normalized.includes("idea") ||
-    normalized.includes("chosen") ||
-    normalized.includes("selected")
-  ) {
-    copy = "ідею подарунку вже обрано";
-  }
-
-  return `${copy}, [${label}]`;
-}
-
 function mediaReminderCopy(daysAhead, hasGift) {
   if (daysAhead === 10) {
-    return "Є час спокійно обрати подарунок і звірити контакти.";
+    return "Є час спокійно узгодити ідею, бюджет і контакти.";
   }
 
   if (daysAhead === 5) {
-    return "Пора фіналізувати подарунок і деталі вручення.";
+    return "Час фіналізувати рішення та деталі вручення.";
   }
 
   if (daysAhead === 3) {
     return hasGift
-      ? "Останній момент: перевірте деталі й закрийте підготовку сьогодні."
-      : "Останній момент: якщо подарунок ще не обрано, краще закрити це сьогодні.";
+      ? "Фінальний чек: звірте деталі й закрийте підготовку сьогодні."
+      : "Останній момент: оберіть варіант і закрийте підготовку сьогодні.";
   }
 
   if (daysAhead === 0) {
-    return "Саме час привітати партнера.";
+    return "Сьогодні вітаємо. Перевірте контакти й деталі перед повідомленням.";
   }
 
   return "Перевірте деталі й оновіть статус у таблиці.";
@@ -249,6 +202,7 @@ function mediaReminderTitle(record, daysAhead) {
 function buildMediaMessage(record, daysAhead) {
   const dateFormatted = formatDate(record.birthday);
   const hasGift = Boolean(record.giftIdea && record.giftIdea.trim());
+  const status = statusSnapshot(record);
   const fields = [
     { label: "Дата", value: dateFormatted },
     { label: "Компанія", value: record.company },
@@ -258,7 +212,8 @@ function buildMediaMessage(record, daysAhead) {
     .filter((field) => field.value)
     .map((field) => mrkdwnBlock(`*${field.label}:*\n${field.value}`));
 
-  const text = `${mediaReminderTitle(record, daysAhead).replace(/\*/g, "")}. Статус: ${statusValue(record)}`;
+  const plainTitle = mediaReminderTitle(record, daysAhead).replace(/\*/g, "");
+  const text = status ? `${plainTitle}. Статус: ${status}` : plainTitle;
 
   return {
     text,
@@ -268,10 +223,10 @@ function buildMediaMessage(record, daysAhead) {
         text: mrkdwnBlock(mediaReminderTitle(record, daysAhead)),
       },
       ...(fields.length ? [{ type: "section", fields }] : []),
-      {
+      ...(status ? [{
         type: "section",
-        text: mrkdwnBlock(`*Статус:* ${statusValue(record)}`),
-      },
+        text: mrkdwnBlock(`*Статус:* ${status}`),
+      }] : []),
       {
         type: "section",
         text: mrkdwnBlock(mediaReminderCopy(daysAhead, hasGift)),
