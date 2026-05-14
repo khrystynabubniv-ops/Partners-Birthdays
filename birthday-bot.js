@@ -169,9 +169,21 @@ function daysUntilBirthday(dateStr) {
   return Math.round((nextBirthday - today) / 86400000);
 }
 
+function mediaStatusText(record) {
+  const hasGift = Boolean(record.giftIdea && record.giftIdea.trim());
+  const baseStatus = hasGift ? "ідею вже додано" : "подарунок ще не обрано";
+  const notionStatus = statusSnapshot(record);
+
+  if (!notionStatus || notionStatus.toLowerCase() === baseStatus.toLowerCase()) {
+    return baseStatus;
+  }
+
+  return `${baseStatus}, [${notionStatus}]`;
+}
+
 function mediaReminderCopy(daysAhead, hasGift) {
   if (daysAhead === 10) {
-    return "Є час спокійно узгодити ідею, бюджет і контакти.";
+    return "Є час спокійно обрати варіант, узгодити бюджет і контакти.";
   }
 
   if (daysAhead === 5) {
@@ -180,8 +192,8 @@ function mediaReminderCopy(daysAhead, hasGift) {
 
   if (daysAhead === 3) {
     return hasGift
-      ? "Фінальний чек: звірте деталі й закрийте підготовку сьогодні."
-      : "Останній момент: оберіть варіант і закрийте підготовку сьогодні.";
+      ? "Останній момент: перевірте деталі й закрийте підготовку сьогодні."
+      : "Останній момент: якщо подарунок ще не обрано, краще закрити це сьогодні.";
   }
 
   if (daysAhead === 0) {
@@ -202,7 +214,7 @@ function mediaReminderTitle(record, daysAhead) {
 function buildMediaMessage(record, daysAhead) {
   const dateFormatted = formatDate(record.birthday);
   const hasGift = Boolean(record.giftIdea && record.giftIdea.trim());
-  const status = statusSnapshot(record);
+  const status = mediaStatusText(record);
   const fields = [
     { label: "Дата", value: dateFormatted },
     { label: "Компанія", value: record.company },
@@ -213,7 +225,7 @@ function buildMediaMessage(record, daysAhead) {
     .map((field) => mrkdwnBlock(`*${field.label}:*\n${field.value}`));
 
   const plainTitle = mediaReminderTitle(record, daysAhead).replace(/\*/g, "");
-  const text = status ? `${plainTitle}. Статус: ${status}` : plainTitle;
+  const text = `${plainTitle}. Статус: ${status}`;
 
   return {
     text,
@@ -223,10 +235,10 @@ function buildMediaMessage(record, daysAhead) {
         text: mrkdwnBlock(mediaReminderTitle(record, daysAhead)),
       },
       ...(fields.length ? [{ type: "section", fields }] : []),
-      ...(status ? [{
+      {
         type: "section",
         text: mrkdwnBlock(`*Статус:* ${status}`),
-      }] : []),
+      },
       {
         type: "section",
         text: mrkdwnBlock(mediaReminderCopy(daysAhead, hasGift)),
