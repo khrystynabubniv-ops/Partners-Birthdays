@@ -3,10 +3,32 @@ name: Birthday Bot
 on:
   schedule:
     - cron: '0 8 * * *'  # 08:00 UTC = 11:00 Київ
+    - cron: '*/15 * * * *' # перевірка змін Status для оновлення Slack-повідомлень
   workflow_dispatch:      # дозволяє запустити вручну для тесту
+    inputs:
+      mode:
+        description: 'Що запустити'
+        required: true
+        default: 'notify'
+        type: choice
+        options:
+          - notify
+          - sync-statuses
+          - test-record
+      record_name:
+        description: 'Назва Notion-запису для тесту'
+        required: false
+        default: 'тест'
+        type: string
+      test_days:
+        description: 'Скільки днів показати в тестовому повідомленні'
+        required: false
+        default: '3'
+        type: string
 
 jobs:
   run-bot:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 8 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'notify') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -25,4 +47,53 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          CEO_SLACK_USER_ID: ${{ secrets.CEO_SLACK_USER_ID }}
         run: node birthday-bot.js --run-once
+
+  sync-statuses:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'sync-statuses') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Sync Slack statuses
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          CEO_SLACK_USER_ID: ${{ secrets.CEO_SLACK_USER_ID }}
+        run: node birthday-bot.js --sync-statuses
+
+  test-record:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'test-record' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Send test record notification
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          CEO_SLACK_USER_ID: ${{ secrets.CEO_SLACK_USER_ID }}
+          TEST_RECORD_NAME: ${{ inputs.record_name }}
+          TEST_DAYS_AHEAD: ${{ inputs.test_days }}
+        run: node birthday-bot.js --test-record "$TEST_RECORD_NAME" --test-days "$TEST_DAYS_AHEAD"
