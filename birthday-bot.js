@@ -50,6 +50,16 @@ function getTargetIsoDate(daysAhead) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function addDaysToIsoDate(isoDate, daysAhead) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + daysAhead);
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return "";
   const months = [
@@ -71,7 +81,11 @@ function timingText(daysAhead) {
 }
 
 function reminderKey(daysAhead) {
-  return `${getTargetIsoDate(daysAhead)}:${daysAhead}`;
+  return reminderKeyForDate(getTargetIsoDate(daysAhead), daysAhead);
+}
+
+function reminderKeyForDate(targetDate, daysAhead) {
+  return `${targetDate}:${daysAhead}`;
 }
 
 function getArgValue(name) {
@@ -441,7 +455,9 @@ function findRecordByName(records, targetName) {
 
 async function postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled, options = {}) {
   const message = buildSlackMessage(record, daysAhead, ceoMention);
-  const key = reminderKey(daysAhead);
+  const key = options.reminderDate
+    ? reminderKeyForDate(options.reminderDate, daysAhead)
+    : reminderKey(daysAhead);
   const trackedMessageIsCurrent = options.updateExisting && trackingEnabled && record.slackMessageTs && record.slackReminderKey === key;
 
   if (trackedMessageIsCurrent) {
@@ -545,6 +561,111 @@ async function sendTestRecordNotification() {
   console.log(`Готово. Тестове повідомлення для "${record.name}" ${result === "updated" ? "оновлено" : "надіслано"} (daysAhead=${daysAhead}).`);
 }
 
+function parseSlackMessageRef(ref) {
+  const trimmed = (ref || "").trim();
+  if (!trimmed) return null;
+
+  const urlMatch = trimmed.match(/\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/);
+  if (urlMatch) {
+    return { channel: urlMatch[1], ts: `${urlMatch[2]}.${urlMatch[3]}` };
+  }
+
+  const explicitMatch = trimmed.match(/^([A-Z0-9]+)[/:](\d{10})(?:\.?)(\d{6})$/);
+  if (explicitMatch) {
+    return { channel: explicitMatch[1], ts: `${explicitMatch[2]}.${explicitMatch[3]}` };
+  }
+
+  return null;
+}
+
+function parseList(value) {
+  return (value || "")
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function deleteSlackMessages(messageRefs) {
+  let deleted = 0;
+
+  for (const ref of messageRefs) {
+    const message = parseSlackMessageRef(ref);
+    if (!message) {
+      console.warn(`Пропущено некоректний Slack message ref: ${ref}`);
+      continue;
+    }
+
+    try {
+      await slack.chat.delete({
+        channel: message.channel,
+        ts: message.ts,
+      });
+      deleted++;
+      console.log(`✓ Видалено Slack-повідомлення ${message.channel}/${message.ts}`);
+    } catch (err) {
+      const slackError = err.data?.error || err.message;
+      if (slackError === "message_not_found") {
+        console.warn(`Повідомлення вже не знайдено: ${message.channel}/${message.ts}`);
+        continue;
+      }
+      throw new Error(`Не вдалося видалити ${message.channel}/${message.ts}: ${slackError}`);
+    }
+  }
+
+  return deleted;
+}
+
+async function repairSlackMessages() {
+  const repairDate = process.env.REPAIR_DATE || getArgValue("--repair-date");
+  const repairDays = parseList(process.env.REPAIR_DAYS || getArgValue("--repair-days") || "0,10").map(Number);
+  const deleteMessageRefs = parseList(process.env.REPAIR_DELETE_MESSAGES || getArgValue("--delete-messages"));
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(repairDate)) {
+    throw new Error("Для repair-режиму вкажіть дату у форматі YYYY-MM-DD через --repair-date або REPAIR_DATE.");
+  }
+
+  if (!repairDays.length || repairDays.some((daysAhead) => !Number.isFinite(daysAhead))) {
+    throw new Error("Для repair-режиму вкажіть коректні дні через --repair-days або REPAIR_DAYS, наприклад 0,10.");
+  }
+
+  console.log(`[${new Date().toISOString()}] Repair Slack messages for ${repairDate}; days=${repairDays.join(",")}`);
+
+  if (deleteMessageRefs.length) {
+    const deleted = await deleteSlackMessages(deleteMessageRefs);
+    console.log(`Видалено повідомлень: ${deleted}.`);
+  }
+
+  const trackingEnabled = await ensureTrackingProperties();
+  const records = await fetchBirthdays();
+  let sent = 0;
+  let ceoMention = "";
+
+  for (const daysAhead of repairDays) {
+    const targetDate = addDaysToIsoDate(repairDate, daysAhead);
+    const targetMonthDay = targetDate.slice(5);
+    const matches = records.filter((record) => record.monthDay === targetMonthDay);
+
+    if (!matches.length) {
+      console.warn(`Не знайдено записів для ${targetDate} (за ${daysAhead} днів від ${repairDate}).`);
+      continue;
+    }
+
+    for (const record of matches) {
+      if (record.ceo && !ceoMention) {
+        ceoMention = await resolveCeoSlackMention();
+      }
+
+      await postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled, {
+        reminderDate: targetDate,
+      });
+      sent++;
+      console.log(`✓ Перевідправлено: ${record.name} (target ${targetDate}, daysAhead=${daysAhead})`);
+    }
+  }
+
+  console.log(`Repair завершено. Перевідправлено повідомлень: ${sent}.`);
+}
+
 async function syncTrackedStatuses() {
   console.log(`[${new Date().toISOString()}] Перевіряємо зміни статусів...`);
 
@@ -600,6 +721,11 @@ async function syncTrackedStatuses() {
 
 if (process.argv.includes("--test-record")) {
   sendTestRecordNotification().then(() => process.exit(0)).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+} else if (process.argv.includes("--repair-messages")) {
+  repairSlackMessages().then(() => process.exit(0)).catch((err) => {
     console.error(err);
     process.exit(1);
   });

@@ -15,6 +15,7 @@ on:
           - notify
           - sync-statuses
           - test-record
+          - repair-messages
       record_name:
         description: 'Назва Notion-запису для тесту'
         required: false
@@ -24,6 +25,21 @@ on:
         description: 'Скільки днів показати в тестовому повідомленні'
         required: false
         default: '3'
+        type: string
+      repair_date:
+        description: 'Дата запуску, яку треба відтворити (YYYY-MM-DD)'
+        required: false
+        default: '2026-05-17'
+        type: string
+      repair_days:
+        description: 'Які reminder-и перевідправити, наприклад 0,10'
+        required: false
+        default: '0,10'
+        type: string
+      delete_message_urls:
+        description: 'Slack message URLs або C...:timestamp через кому'
+        required: false
+        default: ''
         type: string
 
 jobs:
@@ -97,3 +113,29 @@ jobs:
           TEST_RECORD_NAME: ${{ inputs.record_name }}
           TEST_DAYS_AHEAD: ${{ inputs.test_days }}
         run: node birthday-bot.js --test-record "$TEST_RECORD_NAME" --test-days "$TEST_DAYS_AHEAD"
+
+  repair-messages:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'repair-messages' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Delete old messages and resend reminders
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          CEO_SLACK_USER_ID: ${{ secrets.CEO_SLACK_USER_ID }}
+          REPAIR_DATE: ${{ inputs.repair_date }}
+          REPAIR_DAYS: ${{ inputs.repair_days }}
+          REPAIR_DELETE_MESSAGES: ${{ inputs.delete_message_urls }}
+        run: node birthday-bot.js --repair-messages --repair-date "$REPAIR_DATE" --repair-days "$REPAIR_DAYS" --delete-messages "$REPAIR_DELETE_MESSAGES"
