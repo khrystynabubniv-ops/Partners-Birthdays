@@ -15,6 +15,7 @@ on:
           - notify
           - sync-statuses
           - test-record
+          - delete-messages
           - repair-messages
       record_name:
         description: 'Назва Notion-запису для тесту'
@@ -139,3 +140,25 @@ jobs:
           REPAIR_DAYS: ${{ inputs.repair_days }}
           REPAIR_DELETE_MESSAGES: ${{ inputs.delete_message_urls }}
         run: node birthday-bot.js --repair-messages --repair-date "$REPAIR_DATE" --repair-days "$REPAIR_DAYS" --delete-messages "$REPAIR_DELETE_MESSAGES"
+
+  delete-messages:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'delete-messages' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Delete Slack messages
+        env:
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          DELETE_MESSAGES: ${{ inputs.delete_message_urls }}
+        run: node birthday-bot.js --delete-messages "$DELETE_MESSAGES"

@@ -6,6 +6,7 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const NOTION_DATABASE_ID = "281135c9b8ac4a40ac16c8c6ac34955f";
 const SLACK_TOKEN = process.env.SLACK_TOKEN;
 const SLACK_CHANNEL = "C0AR67VRHU5";
+const SLACK_MESSAGE_SPACING_MS = Number(process.env.SLACK_MESSAGE_SPACING_MS || 6 * 60 * 1000);
 const CEO_SLACK_USER_ID = process.env.CEO_SLACK_USER_ID || process.env.CEO_SLACK_MENTION || "U0ADWP5UFTM";
 const CEO_SLACK_DM_CHANNEL = process.env.CEO_SLACK_DM_CHANNEL || "D0AU2AFCSN6";
 const CEO_SLACK_DISPLAY_NAME = process.env.CEO_SLACK_DISPLAY_NAME || "Iryna Blakyta";
@@ -92,6 +93,20 @@ function getArgValue(name) {
   const index = process.argv.indexOf(name);
   if (index === -1) return "";
   return process.argv[index + 1] || "";
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitBeforeNextSlackPost(alreadyPosted) {
+  if (!alreadyPosted || !Number.isFinite(SLACK_MESSAGE_SPACING_MS) || SLACK_MESSAGE_SPACING_MS <= 0) {
+    return;
+  }
+
+  const seconds = Math.round(SLACK_MESSAGE_SPACING_MS / 1000);
+  console.log(`Пауза ${seconds} секунд перед наступним Slack-повідомленням, щоб Slack показав бот-іконку окремо.`);
+  await sleep(SLACK_MESSAGE_SPACING_MS);
 }
 
 function plainTextBlock(text) {
@@ -518,6 +533,7 @@ async function checkAndNotify() {
         if (record.ceo && !ceoMention) {
           ceoMention = await resolveCeoSlackMention();
         }
+        await waitBeforeNextSlackPost(sent > 0);
         const result = await postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled);
         if (result === "updated") {
           updated++;
@@ -615,6 +631,17 @@ async function deleteSlackMessages(messageRefs) {
   return deleted;
 }
 
+async function deleteSlackMessagesOnly() {
+  const deleteMessageRefs = parseList(process.env.DELETE_MESSAGES || getArgValue("--delete-messages"));
+
+  if (!deleteMessageRefs.length) {
+    throw new Error("Для delete-режиму передайте Slack message URLs через --delete-messages або DELETE_MESSAGES.");
+  }
+
+  const deleted = await deleteSlackMessages(deleteMessageRefs);
+  console.log(`Готово. Видалено повідомлень: ${deleted}.`);
+}
+
 async function repairSlackMessages() {
   const repairDate = process.env.REPAIR_DATE || getArgValue("--repair-date");
   const repairDays = parseList(process.env.REPAIR_DAYS || getArgValue("--repair-days") || "0,10").map(Number);
@@ -655,6 +682,7 @@ async function repairSlackMessages() {
         ceoMention = await resolveCeoSlackMention();
       }
 
+      await waitBeforeNextSlackPost(sent > 0);
       await postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled, {
         reminderDate: targetDate,
       });
@@ -726,6 +754,11 @@ if (process.argv.includes("--test-record")) {
   });
 } else if (process.argv.includes("--repair-messages")) {
   repairSlackMessages().then(() => process.exit(0)).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+} else if (process.argv.includes("--delete-messages")) {
+  deleteSlackMessagesOnly().then(() => process.exit(0)).catch((err) => {
     console.error(err);
     process.exit(1);
   });
