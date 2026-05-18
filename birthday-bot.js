@@ -276,8 +276,10 @@ function buildSlackMessage(record, daysAhead, ceoMention) {
 function formatSlackUserMention(userId) {
   const trimmed = (userId || "").trim();
   if (!trimmed) return "";
-  if (trimmed.startsWith("<@") && trimmed.endsWith(">")) return trimmed;
-  if (/^[UW][A-Z0-9]+$/.test(trimmed)) return `<@${trimmed}>`;
+  const rawUserId = trimmed.startsWith("<@") && trimmed.endsWith(">")
+    ? trimmed.slice(2, -1).split("|")[0]
+    : trimmed;
+  if (/^[UW][A-Z0-9]+$/.test(rawUserId)) return `<@${rawUserId}>`;
   return "";
 }
 
