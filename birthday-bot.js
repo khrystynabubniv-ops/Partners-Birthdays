@@ -7,6 +7,9 @@ const NOTION_DATABASE_ID = "281135c9b8ac4a40ac16c8c6ac34955f";
 const SLACK_TOKEN = process.env.SLACK_TOKEN;
 const SLACK_CHANNEL = "C0AR67VRHU5";
 const SLACK_MESSAGE_SPACING_MS = Number(process.env.SLACK_MESSAGE_SPACING_MS || 6 * 60 * 1000);
+const NOTION_REQUEST_SPACING_MS = Number(process.env.NOTION_REQUEST_SPACING_MS || 400);
+const NOTION_RETRY_MAX_ATTEMPTS = Number(process.env.NOTION_RETRY_MAX_ATTEMPTS || 6);
+const NOTION_RETRY_BASE_MS = Number(process.env.NOTION_RETRY_BASE_MS || 1000);
 const CEO_SLACK_USER_ID = process.env.CEO_SLACK_USER_ID || process.env.CEO_SLACK_MENTION || "U0ADWP5UFTM";
 const CEO_SLACK_DM_CHANNEL = process.env.CEO_SLACK_DM_CHANNEL || "D0AU2AFCSN6";
 const CEO_SLACK_DISPLAY_NAME = process.env.CEO_SLACK_DISPLAY_NAME || "Iryna Blakyta";
@@ -25,6 +28,7 @@ const notion = new Client({ auth: NOTION_TOKEN });
 const slack = new WebClient(SLACK_TOKEN);
 let trackingPropertiesEnsured = false;
 let cachedCeoMention = null;
+let lastNotionRequestAt = 0;
 
 function toMonthDay(dateStr) {
   if (!dateStr) return null;
@@ -97,6 +101,99 @@ function getArgValue(name) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getHeaderValue(headers, name) {
+  if (!headers) return "";
+
+  if (typeof headers.get === "function") {
+    return headers.get(name) || headers.get(name.toLowerCase()) || "";
+  }
+
+  const value = headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()];
+  if (Array.isArray(value)) return value[0] ? String(value[0]) : "";
+  return value ? String(value) : "";
+}
+
+function parseNotionErrorBody(err) {
+  if (!err?.body) return {};
+  if (typeof err.body === "object") return err.body;
+
+  try {
+    return JSON.parse(err.body);
+  } catch {
+    return {};
+  }
+}
+
+function isRetryableNotionError(err) {
+  const body = parseNotionErrorBody(err);
+  const status = Number(err.status || err.statusCode || body.status);
+  const code = err.code || body.code;
+
+  return code === "rate_limited" || status === 429 || (status >= 500 && status < 600);
+}
+
+function getRetryAfterMs(err) {
+  const retryAfter = getHeaderValue(err?.headers, "retry-after");
+  if (!retryAfter) return null;
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+
+  const retryDateMs = Date.parse(retryAfter);
+  if (Number.isFinite(retryDateMs)) return Math.max(0, retryDateMs - Date.now());
+
+  return null;
+}
+
+function getNotionRetryDelayMs(err, attemptIndex) {
+  const retryAfterMs = getRetryAfterMs(err);
+  if (Number.isFinite(retryAfterMs)) return retryAfterMs + 250;
+
+  const retryBaseMs = Number.isFinite(NOTION_RETRY_BASE_MS) && NOTION_RETRY_BASE_MS > 0
+    ? NOTION_RETRY_BASE_MS
+    : 1000;
+  const jitterMs = Math.floor(Math.random() * 250);
+
+  return Math.min(retryBaseMs * (2 ** attemptIndex) + jitterMs, 30000);
+}
+
+async function waitForNotionSlot() {
+  const spacingMs = Number.isFinite(NOTION_REQUEST_SPACING_MS) && NOTION_REQUEST_SPACING_MS > 0
+    ? NOTION_REQUEST_SPACING_MS
+    : 0;
+  const elapsedMs = Date.now() - lastNotionRequestAt;
+
+  if (elapsedMs < spacingMs) {
+    await sleep(spacingMs - elapsedMs);
+  }
+
+  lastNotionRequestAt = Date.now();
+}
+
+async function withNotionRetry(label, operation) {
+  const maxAttempts = Number.isFinite(NOTION_RETRY_MAX_ATTEMPTS) && NOTION_RETRY_MAX_ATTEMPTS > 0
+    ? Math.floor(NOTION_RETRY_MAX_ATTEMPTS)
+    : 6;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await waitForNotionSlot();
+      return await operation();
+    } catch (err) {
+      if (!isRetryableNotionError(err) || attempt === maxAttempts) {
+        throw err;
+      }
+
+      const delayMs = getNotionRetryDelayMs(err, attempt - 1);
+      const seconds = Math.round(delayMs / 100) / 10;
+      console.warn(`Notion тимчасово обмежив запит "${label}". Повтор ${attempt + 1}/${maxAttempts} через ${seconds} с.`);
+      await sleep(delayMs);
+    }
+  }
+
+  throw new Error(`Notion-запит "${label}" не виконався.`);
 }
 
 async function waitBeforeNextSlackPost(alreadyPosted) {
@@ -366,7 +463,9 @@ async function ensureTrackingProperties() {
   if (trackingPropertiesEnsured) return true;
 
   try {
-    const database = await notion.databases.retrieve({ database_id: NOTION_DATABASE_ID });
+    const database = await withNotionRetry("отримання структури бази", () => notion.databases.retrieve({
+      database_id: NOTION_DATABASE_ID,
+    }));
     const missingProperties = {};
 
     for (const propertyName of Object.values(TRACKING_PROPERTIES)) {
@@ -376,10 +475,10 @@ async function ensureTrackingProperties() {
     }
 
     if (Object.keys(missingProperties).length) {
-      await notion.databases.update({
+      await withNotionRetry("оновлення структури бази", () => notion.databases.update({
         database_id: NOTION_DATABASE_ID,
         properties: missingProperties,
-      });
+      }));
       console.log(`Додано службові Notion-поля: ${Object.keys(missingProperties).join(", ")}`);
     }
 
@@ -402,10 +501,10 @@ async function updateTrackingProperties(record, values) {
     [TRACKING_PROPERTIES.statusSnapshot]: richTextProperty(values.statusSnapshot),
   };
 
-  await notion.pages.update({
+  await withNotionRetry(`оновлення tracking для ${record.name}`, () => notion.pages.update({
     page_id: record.id,
     properties,
-  });
+  }));
 }
 
 async function tryUpdateTrackingProperties(record, values) {
@@ -423,11 +522,11 @@ async function fetchBirthdays() {
   let cursor = undefined;
 
   do {
-    const response = await notion.databases.query({
+    const response = await withNotionRetry("читання записів бази", () => notion.databases.query({
       database_id: NOTION_DATABASE_ID,
       start_cursor: cursor,
       page_size: 100,
-    });
+    }));
 
     for (const page of response.results) {
       const props = page.properties;
