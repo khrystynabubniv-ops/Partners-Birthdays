@@ -10,9 +10,6 @@ const SLACK_MESSAGE_SPACING_MS = Number(process.env.SLACK_MESSAGE_SPACING_MS || 
 const NOTION_REQUEST_SPACING_MS = Number(process.env.NOTION_REQUEST_SPACING_MS || 400);
 const NOTION_RETRY_MAX_ATTEMPTS = Number(process.env.NOTION_RETRY_MAX_ATTEMPTS || 6);
 const NOTION_RETRY_BASE_MS = Number(process.env.NOTION_RETRY_BASE_MS || 1000);
-const CEO_SLACK_USER_ID = process.env.CEO_SLACK_USER_ID || process.env.CEO_SLACK_MENTION || "U0ADWP5UFTM";
-const CEO_SLACK_DM_CHANNEL = process.env.CEO_SLACK_DM_CHANNEL || "D0AU2AFCSN6";
-const CEO_SLACK_DISPLAY_NAME = process.env.CEO_SLACK_DISPLAY_NAME || "Iryna Blakyta";
 const NOTION_DB_URL = "https://www.notion.so/281135c9b8ac4a40ac16c8c6ac34955f";
 const DESIGN_TASK_BOT_URL = "https://genesistech.slack.com/archives/D0ATEC745GU";
 
@@ -27,7 +24,6 @@ const TRACKING_PROPERTIES = {
 const notion = new Client({ auth: NOTION_TOKEN });
 const slack = new WebClient(SLACK_TOKEN);
 let trackingPropertiesEnsured = false;
-let cachedCeoMention = null;
 let lastNotionRequestAt = 0;
 
 function toMonthDay(dateStr) {
@@ -355,11 +351,11 @@ function buildMediaMessage(record, daysAhead) {
   };
 }
 
-function buildCeoMessage(record, daysAhead, ceoMention) {
+function buildCeoMessage(record, daysAhead) {
   const dateFormatted = formatDate(record.birthday);
   const title = `🎂 ${timingText(daysAhead)} — день народження партнера CEO · *${record.name}*`;
   const copy = "Саме час подбати про привітання! Якщо потрібен подарунок від дизайнера — створи таску заздалегідь, щоб все встигли підготувати:";
-  const text = `${ceoMention} ${title.replace(/\*/g, "")}. ${dateFormatted}. ${copy} ${DESIGN_TASK_BOT_URL}`;
+  const text = `${title.replace(/\*/g, "")}. ${dateFormatted}. ${copy} ${DESIGN_TASK_BOT_URL}`;
 
   return {
     text,
@@ -374,7 +370,7 @@ function buildCeoMessage(record, daysAhead, ceoMention) {
       },
       {
         type: "section",
-        text: mrkdwnBlock(`${ceoMention} ${copy}`),
+        text: mrkdwnBlock(copy),
       },
       {
         type: "actions",
@@ -391,72 +387,12 @@ function buildCeoMessage(record, daysAhead, ceoMention) {
   };
 }
 
-function buildSlackMessage(record, daysAhead, ceoMention) {
+function buildSlackMessage(record, daysAhead) {
   if (record.ceo) {
-    return buildCeoMessage(record, daysAhead, ceoMention);
+    return buildCeoMessage(record, daysAhead);
   }
 
   return buildMediaMessage(record, daysAhead);
-}
-
-function formatSlackUserMention(userId) {
-  const trimmed = (userId || "").trim();
-  if (!trimmed) return "";
-  const rawUserId = trimmed.startsWith("<@") && trimmed.endsWith(">")
-    ? trimmed.slice(2, -1).split("|")[0]
-    : trimmed;
-  if (/^[UW][A-Z0-9]+$/.test(rawUserId)) return `<@${rawUserId}>`;
-  return "";
-}
-
-async function resolveCeoSlackMention() {
-  if (cachedCeoMention) return cachedCeoMention;
-
-  const configuredMention = formatSlackUserMention(CEO_SLACK_USER_ID);
-  if (configuredMention) {
-    cachedCeoMention = configuredMention;
-    return cachedCeoMention;
-  }
-
-  try {
-    if (CEO_SLACK_DM_CHANNEL) {
-      const response = await slack.conversations.info({ channel: CEO_SLACK_DM_CHANNEL });
-      const userId = response.channel?.user;
-      const mention = formatSlackUserMention(userId);
-      if (mention) {
-        cachedCeoMention = mention;
-        return cachedCeoMention;
-      }
-    }
-  } catch (err) {
-    console.warn(`Не вдалося отримати Slack user id із DM-каналу ${CEO_SLACK_DM_CHANNEL}: ${err.message}`);
-  }
-
-  try {
-    const response = await slack.users.list({ limit: 200 });
-    const normalizedTarget = CEO_SLACK_DISPLAY_NAME.toLowerCase();
-    const user = response.members?.find((member) => {
-      const profile = member.profile || {};
-      return [
-        profile.real_name,
-        profile.display_name,
-        member.real_name,
-        member.name,
-      ]
-        .filter(Boolean)
-        .some((name) => name.toLowerCase() === normalizedTarget);
-    });
-    const mention = formatSlackUserMention(user?.id);
-    if (mention) {
-      cachedCeoMention = mention;
-      return cachedCeoMention;
-    }
-  } catch (err) {
-    console.warn(`Не вдалося знайти ${CEO_SLACK_DISPLAY_NAME} у Slack users.list: ${err.message}`);
-  }
-
-  cachedCeoMention = `@${CEO_SLACK_DISPLAY_NAME}`;
-  return cachedCeoMention;
 }
 
 async function ensureTrackingProperties() {
@@ -567,8 +503,8 @@ function findRecordByName(records, targetName) {
   return records.find((record) => record.name.trim().toLowerCase().includes(normalizedTarget));
 }
 
-async function postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled, options = {}) {
-  const message = buildSlackMessage(record, daysAhead, ceoMention);
+async function postOrUpdateReminder(record, daysAhead, trackingEnabled, options = {}) {
+  const message = buildSlackMessage(record, daysAhead);
   const key = options.reminderDate
     ? reminderKeyForDate(options.reminderDate, daysAhead)
     : reminderKey(daysAhead);
@@ -621,7 +557,6 @@ async function checkAndNotify() {
   const targetDays = [0, 3, 5, 10];
   let sent = 0;
   let updated = 0;
-  let ceoMention = "";
 
   for (const daysAhead of targetDays) {
     const target = getTargetMonthDay(daysAhead);
@@ -629,11 +564,8 @@ async function checkAndNotify() {
 
     for (const record of matches) {
       try {
-        if (record.ceo && !ceoMention) {
-          ceoMention = await resolveCeoSlackMention();
-        }
         await waitBeforeNextSlackPost(sent > 0);
-        const result = await postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled);
+        const result = await postOrUpdateReminder(record, daysAhead, trackingEnabled);
         if (result === "updated") {
           updated++;
           console.log(`↻ Оновлено: ${record.name} (за ${daysAhead} днів, channel ${SLACK_CHANNEL})`);
@@ -670,8 +602,7 @@ async function sendTestRecordNotification() {
 
   const parsedDaysAhead = Number(requestedDaysAhead);
   const daysAhead = Number.isFinite(parsedDaysAhead) ? parsedDaysAhead : daysUntilBirthday(record.birthday);
-  const ceoMention = record.ceo ? await resolveCeoSlackMention() : "";
-  const result = await postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled);
+  const result = await postOrUpdateReminder(record, daysAhead, trackingEnabled);
 
   console.log(`Готово. Тестове повідомлення для "${record.name}" ${result === "updated" ? "оновлено" : "надіслано"} (daysAhead=${daysAhead}).`);
 }
@@ -764,7 +695,6 @@ async function repairSlackMessages() {
   const trackingEnabled = await ensureTrackingProperties();
   const records = await fetchBirthdays();
   let sent = 0;
-  let ceoMention = "";
 
   for (const daysAhead of repairDays) {
     const targetDate = addDaysToIsoDate(repairDate, daysAhead);
@@ -777,12 +707,8 @@ async function repairSlackMessages() {
     }
 
     for (const record of matches) {
-      if (record.ceo && !ceoMention) {
-        ceoMention = await resolveCeoSlackMention();
-      }
-
       await waitBeforeNextSlackPost(sent > 0);
-      await postOrUpdateReminder(record, daysAhead, ceoMention, trackingEnabled, {
+      await postOrUpdateReminder(record, daysAhead, trackingEnabled, {
         reminderDate: targetDate,
       });
       sent++;
@@ -818,7 +744,7 @@ async function syncTrackedStatuses() {
       continue;
     }
 
-    const message = buildSlackMessage(record, daysAhead, "");
+    const message = buildSlackMessage(record, daysAhead);
     const channel = record.slackMessageChannel || SLACK_CHANNEL;
 
     try {
